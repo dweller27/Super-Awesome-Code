@@ -139,8 +139,10 @@ public class RobotTemplate extends IterativeRobot
                 hardRight(speed); //Start turning around
                 try
                 {
-                    if (middleValue)
-                        straight(0);
+                    Thread.sleep(3000);
+                    while(!middleValue)
+                        Thread.sleep(50);
+                    straight(0);
                 }
                 catch (Exception e)
                 {
