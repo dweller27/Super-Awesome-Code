@@ -38,14 +38,20 @@ public class RobotTemplate extends IterativeRobot
     DigitalOutput output; // for ultrasonic
     DigitalInput input;
     Ultrasonic ultraSonic;
-    AxisCamera cam; // camera
+    //AxisCamera cam; // camera
     Timer timer = new Timer(); // timer
     DigitalInput left; // for LineTracker
     DigitalInput middle;
     DigitalInput right;
     DriverStation ds;
     boolean forkLeft;
-   
+    boolean pauseAtBegin; //Will the robot pause at the beginning of autonomous before moving?
+    boolean stopAfterHang; //Will the robot stop after it hangs a ubertube?
+    boolean turnAfterHang; //Will the robot turn as it's backing away, or go straight back? (Assuming that stopAfterHang is false)
+    boolean hasHangedTube; // Has the robot hanged its ubertube (or at least attempted to)?
+    boolean hasAlreadyPaused; //Has the robot already paused at the beginning? (Assuming that pauseAtBegin is true)
+    boolean doneWithAuto; //Has the robot done what it needs to in auto mode?
+
     public void robotInit()
     {
             try
@@ -63,6 +69,7 @@ public class RobotTemplate extends IterativeRobot
                 middle = new DigitalInput(2);
                 right = new DigitalInput(14);
 
+
                 output = new DigitalOutput(10); // ultrasonic output
                 input = new DigitalInput(8); //ultrasonic input
                 ultraSonic  = new Ultrasonic(output, input, Ultrasonic.Unit.kMillimeter); //initialize ultrasonic
@@ -70,6 +77,11 @@ public class RobotTemplate extends IterativeRobot
                 ultraSonic.setAutomaticMode(true);
 
                 ds = DriverStation.getInstance();
+
+                hasHangedTube = false;
+                hasAlreadyPaused = false;
+                doneWithAuto = false;
+
             } catch (Exception e) { e.printStackTrace(); }
         timer.delay(1);
     }
@@ -78,13 +90,17 @@ public class RobotTemplate extends IterativeRobot
      * This function is called periodically during autonomous
      */
 
-    boolean atFork = false; // if robot has arrived at fork
     int lastSense = 0; // last LineTracker which saw line (1 for left, 2 for right)
     public void autonomousPeriodic()
     {
-        
-        
-         forkLeft =  ds.getDigitalIn(1);//left         
+         if (doneWithAuto)
+         {
+             return;
+         }
+         forkLeft =  ds.getDigitalIn(1);//left
+         pauseAtBegin = ds.getDigitalIn(2);
+         stopAfterHang = ds.getDigitalIn(3);
+         turnAfterHang = !stopAfterHang && ds.getDigitalIn(4); //This will only be true if stopAfterHang is false
          boolean leftValue = left.get();
          boolean middleValue = middle.get();
          boolean rightValue = right.get();
@@ -94,83 +110,76 @@ public class RobotTemplate extends IterativeRobot
                         (int)(middleValue?2:0)+
                         (int)(leftValue?4:0);
 
+        if (hasHangedTube && !turnAfterHang) //If the robot has hanged the tube, and then should back straight up...
+            {
+                straight(-speed); // Back straight up
+                try
+                {
+                    Thread.sleep(2000); //And after two seconds...
+                }
+                catch (Exception e)
+                {
+                    e.printStackTrace();
+                }
+                straight(0); //Stop backing up
+                doneWithAuto = true;
+                return;
+            }
+        else if (hasHangedTube && turnAfterHang) //If the robot has hanged the tube, and then should turn around...
+            {
+                straight(-speed); //Back straight up
+                try
+                {
+                    Thread.sleep(2000); //And after two seconds...
+                }
+                catch (Exception e)
+                {
+                    e.printStackTrace();
+                }
+                hardRight(speed); //Start turning around
+                try
+                {
+                    if (middleValue)
+                        straight(0);
+                }
+                catch (Exception e)
+                {
+                    e.printStackTrace();
+                }
+                straight(0); //Stop turning around
+                doneWithAuto = true;
+                return;
+         }
+
          if(closerThan(500))
         {
-            //System.out.println("I should stop");
-            straight(0);
+            straight(0); //Stop
+
+            //Here I'm guessing we'd have the hangTube() method
+
+            hasHangedTube = true;
+            if (stopAfterHang) //If the robot is supposed to stay put after it hangs a tube
+                doneWithAuto = true;
             return;
         }
 
-        switch (lineState)
+        if (pauseAtBegin && !hasAlreadyPaused) //If the robot should pause at the beginning and it hasn't already paused...
         {
-            case 0: //No sensors see the line
-                System.out.println("Lost the line: " + lastSense);
-                speed = .25;
-                 if (lastSense == 1) // left is last seen, go left
-                {
-                    setLefts(-speed);//speed * 0.7);
-                    setRights(speed);
-                }
-                else if (lastSense == 2) // go right
-                {
-                    setLefts(speed);
-                    setRights(-speed);//speed * 0.7);
-                }
-                else
-                {
-                    setLefts(0.2); // CAUTION!  Go Slowly!
-                    setRights(0.2);
-                }
-                break;
-            case 1: //Right sees the line
-                softRight(speed);
-                lastSense = 2;
-                break;
-            case 2: //Middle sees the line
-                straight(speed);
-                break;
-            case 3: //Middle and right sees the line
-                softRight(speed);
-                lastSense = 2;
-                break;
-            case 4: //Left sees the line
-               // System.out.println("Hard left");
-                softLeft(speed);
-                lastSense = 1;
-                break;
-            case 5: //Left and right see the line
-                System.out.println("At Cross");
-                if(forkLeft)
-                {
-                    hardLeft(speed);
-                }
-                else
-                {
-                    hardRight(speed);
-                }
-                break;
-            case 6: //Left and middle see the line
-                softLeft(speed);
-                lastSense = 1;
-                break;
-            case 7: //All three see the line
-                System.out.println("At Cross 7");
-                if(forkLeft)
-                {
-                    hardLeft(speed);
-                }
-                else
-                {
-                    hardRight(speed);
-                }
-                break;
-            default:
-                System.out.println("You're doomed. Run.");
+            try
+            {
+                Thread.sleep(3000); //Pause for 3 seconds
+            }
+            catch (Exception e)
+            {
+                e.printStackTrace();
+            }
 
+            hasAlreadyPaused = true; //The robot has now paused
+            System.out.print("Checkpoint 1");
         }
-       
+        System.out.print("Checkpoint 2");
+        moveWhileTracking(lineState, speed);
 
-     
     }
     
     public void teleopPeriodic() 
@@ -271,6 +280,75 @@ public class RobotTemplate extends IterativeRobot
         }
         return false;
     }
+
+    public void moveWhileTracking(int lineState, double speed)
+    {
+      switch (lineState)
+        {
+            case 0: //No sensors see the line
+                System.out.println("Lost the line: " + lastSense);
+                speed = .25;
+                 if (lastSense == 1) // left is last seen, go left
+                {
+                    setLefts(-speed);//speed * 0.7);
+                    setRights(speed);
+                }
+                else if (lastSense == 2) // go right
+                {
+                    setLefts(speed);
+                    setRights(-speed);//speed * 0.7);
+                }
+                else
+                {
+                    setLefts(0.2); // CAUTION!  Go Slowly!
+                    setRights(0.2);
+                }
+                break;
+            case 1: //Right sees the line
+                softRight(speed);
+                lastSense = 2;
+                break;
+            case 2: //Middle sees the line
+                straight(speed);
+                break;
+            case 3: //Middle and right sees the line
+                softRight(speed);
+                lastSense = 2;
+                break;
+            case 4: //Left sees the line
+               // System.out.println("Hard left");
+                softLeft(speed);
+                lastSense = 1;
+                break;
+            case 5: //Left and right see the line
+                System.out.println("At Cross");
+                if(forkLeft)
+                {
+                    hardLeft(speed);
+                }
+                else
+                {
+                    hardRight(speed);
+                }
+                break;
+            case 6: //Left and middle see the line
+                softLeft(speed);
+                lastSense = 1;
+                break;
+            case 7: //All three see the line
+                System.out.println("At Cross 7");
+                if(forkLeft)
+                {
+                    hardLeft(speed);
+                }
+                else
+                {
+                    hardRight(speed);
+                }
+                break;
+            default:
+                System.out.println("You're doomed. Run.");
+        }
     /*public void ultraSonicAct()
     {
         System.out.println(ultraSonic.getRangeMM() + "\t" + ultraSonic.isRangeValid());
@@ -280,4 +358,5 @@ public class RobotTemplate extends IterativeRobot
         }
     }*/
     
+    }
 }
